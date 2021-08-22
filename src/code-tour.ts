@@ -33,32 +33,40 @@ export function activate(context: sourcegraph.ExtensionContext): void {
     // repo URI to tour filenames (or possibly the whole file?)
     const toursByRepo = new Map<string, string[]>()
 
+    let currentRepoTours: any = undefined
+
     sourcegraph.commands.registerCommand('codeTour.selectTour', onCodeTourActionClicked)
 
     const panelView = sourcegraph.app.createPanelView('codeTour')
     panelView.title = 'Code Tour'
     panelView.content = 'LOADING...'
 
+    // TODO: status bar item to keep track of tour, reopen panel
+
     // search for tour files on activation and whenever the opened repository changes.
-    getTours().catch(() => {
-        // noop TODO
-    })
-    sourcegraph.workspace.rootChanges.subscribe(() => {
-        getTours().catch(() => {
+    getTours()
+        .then(tours => {
+            currentRepoTours = tours
+        })
+        .catch(() => {
             // noop TODO
         })
+    sourcegraph.workspace.rootChanges.subscribe(() => {
+        getTours()
+            .then(tours => {
+                // TODO cancellation (without switchmap)
+                currentRepoTours = tours
+            })
+            .catch(() => {
+                // noop TODO
+            })
     })
 
-    context.subscriptions.add(
-        sourcegraph.languages.registerHoverProvider(['*'], {
-            provideHover: () => ({
-                contents: {
-                    value: 'Hello world from code-tour! 🎉🎉🎉',
-                    kind: sourcegraph.MarkupKind.Markdown,
-                },
-            }),
-        })
-    )
+    function onCodeTourActionClicked(): void {
+        console.log('clicked code tour action', { currentRepoTours })
+        // If there's only one tour for this workspace, open the panel and start it now.
+        // Otherwise,
+    }
 }
 
 interface SearchResult {
@@ -91,10 +99,13 @@ async function getTours() {
             return
         }
 
+        // parse each tour file. add valid files to map
         // TODO handle multiple tour files
         const tour: SchemaForCodeTourTourFiles = JSON.parse(tourFiles[0].content)
         tour.steps.map(step => console.log(step.file))
         console.log({ tour })
+
+        return tourFiles
     } catch (error) {
         console.error(error)
     }
@@ -110,8 +121,4 @@ function getRepositoryFromRoots(): string | null {
     return workspaceRoot.uri.host + workspaceRoot.uri.pathname
 }
 
-function onCodeTourActionClicked(): void {
-    console.log('clicked code tour action')
-    // If there's only one tour for this workspace,
-}
 // Sourcegraph extension documentation: https://docs.sourcegraph.com/extensions/authoring
