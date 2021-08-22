@@ -10,9 +10,23 @@
   "categories": [],
   "tags": [],
   "contributes": {
-    "actions": [],
+    "actions": [
+      {
+        "id": "codeTour.openPanel",
+        "command": "codeTour.selectTour",
+        "commandArguments": [
+          "codeTour"
+        ],
+        "actionItem": {
+          "label": "Open code tour panel",
+          "iconURL": "https://vsls-contrib.gallerycdn.vsassets.io/extensions/vsls-contrib/codetour/0.0.58/1625784500119/Microsoft.VisualStudio.Services.Icons.Default"
+        }
+      }
+    ],
     "menus": {
-      "editor/title": [],
+      "editor/title": [
+        {"action": "codeTour.openPanel"}
+      ],
       "commandPalette": []
     },
     "configuration": {}

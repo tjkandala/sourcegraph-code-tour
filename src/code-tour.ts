@@ -1,4 +1,5 @@
 import * as sourcegraph from 'sourcegraph'
+import { SchemaForCodeTourTourFiles } from './codeTour'
 
 /**
  * Creates the search query used to find code tour directories within a repository.
@@ -19,7 +20,8 @@ const tourFilesQuery = `query TourFiles($searchQuery: String) {
                 },
                 file {
                   path,
-                  name
+                  name,
+                  content
                 }
               }
             }
@@ -30,6 +32,12 @@ const tourFilesQuery = `query TourFiles($searchQuery: String) {
 export function activate(context: sourcegraph.ExtensionContext): void {
     // repo URI to tour filenames (or possibly the whole file?)
     const toursByRepo = new Map<string, string[]>()
+
+    sourcegraph.commands.registerCommand('codeTour.selectTour', onCodeTourActionClicked)
+
+    const panelView = sourcegraph.app.createPanelView('codeTour')
+    panelView.title = 'Code Tour'
+    panelView.content = 'LOADING...'
 
     // search for tour files on activation and whenever the opened repository changes.
     getTours().catch(() => {
@@ -56,11 +64,16 @@ export function activate(context: sourcegraph.ExtensionContext): void {
 interface SearchResult {
     search: {
         results: {
-            results: { repository: { name: string }; file: { path: string; name: string } }[]
+            results: { repository: { name: string }; file: { path: string; name: string; content: string } }[]
         }
     }
 }
 
+/**
+ * Get tours and update panel view.
+ * If there are tours for this repo, the action item will be enabled.
+ * Otherwise, it will be disabled.
+ */
 async function getTours() {
     try {
         const repository = getRepositoryFromRoots()
@@ -72,8 +85,16 @@ async function getTours() {
             searchQuery: createToursDirectoryQuery(repository),
         })
 
-        console.log({ repository, result })
-        result.data?.search.results.results.map(result => console.log(result.file.path))
+        const tourFiles = result.data?.search.results.results.map(result => result.file)
+
+        if (!tourFiles || !tourFiles[0]) {
+            return
+        }
+
+        // TODO handle multiple tour files
+        const tour: SchemaForCodeTourTourFiles = JSON.parse(tourFiles[0].content)
+        tour.steps.map(step => console.log(step.file))
+        console.log({ tour })
     } catch (error) {
         console.error(error)
     }
@@ -89,4 +110,8 @@ function getRepositoryFromRoots(): string | null {
     return workspaceRoot.uri.host + workspaceRoot.uri.pathname
 }
 
+function onCodeTourActionClicked(): void {
+    console.log('clicked code tour action')
+    // If there's only one tour for this workspace,
+}
 // Sourcegraph extension documentation: https://docs.sourcegraph.com/extensions/authoring
