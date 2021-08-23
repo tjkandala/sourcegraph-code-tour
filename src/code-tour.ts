@@ -1,3 +1,5 @@
+import { EMPTY, from, of } from 'rxjs'
+import { map, switchMap } from 'rxjs/operators'
 import * as sourcegraph from 'sourcegraph'
 import { SchemaForCodeTourTourFiles } from './codeTour'
 
@@ -53,8 +55,11 @@ interface CodeTourContext {
     ['codeTour.activeTourIndex']: number | null
     ['codeTour.activeTourTitle']: string | null
     ['codeTour.tourStep']: number | null
-    ['codeTour.hasPrevStep']: boolean | null
-    ['codeTour.hasNextStep']: boolean | null // Show "complete tour" action when false
+    ['codeTour.showPrevStep']: boolean | null
+    ['codeTour.showPrevStepSameLocation']: boolean | null
+    ['codeTour.showNextStep']: boolean | null
+    ['codeTour.showNextStepSameLocation']: boolean | null
+    ['codeTour.showCompleteTour']: boolean | null
 }
 
 /** Used to reset/initialize context */
@@ -65,12 +70,11 @@ const nullContext: CodeTourContext = {
     'codeTour.activeTourIndex': null,
     'codeTour.activeTourTitle': null,
     'codeTour.tourStep': null,
-    'codeTour.hasPrevStep': null,
-    'codeTour.hasNextStep': null,
-}
-
-function updateContext(partialContext: Partial<CodeTourContext>): void {
-    sourcegraph.internal.updateContext(partialContext as sourcegraph.ContextValues)
+    'codeTour.showPrevStep': null,
+    'codeTour.showPrevStepSameLocation': null,
+    'codeTour.showNextStep': null,
+    'codeTour.showNextStepSameLocation': null,
+    'codeTour.showCompleteTour': null,
 }
 
 export function activate(context: sourcegraph.ExtensionContext): void {
@@ -81,13 +85,21 @@ export function activate(context: sourcegraph.ExtensionContext): void {
 
     let currentRepoTours: RepoTour[] = []
 
+    // Keep copy of context in scope
+    let currentContext: CodeTourContext = nullContext
+    function updateContext(partialContext: Partial<CodeTourContext>): void {
+        currentContext = { ...currentContext, ...partialContext }
+        sourcegraph.internal.updateContext(currentContext as any)
+    }
+
     // Used for request cancellation (TODO: can we just use switchMap?)
     let currentRequestID = 0
 
     sourcegraph.commands.registerCommand('codeTour.selectTour', onSelectTour)
     sourcegraph.commands.registerCommand('codeTour.startTour', onStartTour)
-    sourcegraph.commands.registerCommand('codeTour.prevStep', onPreviousStep)
-    sourcegraph.commands.registerCommand('codeTour.nextStep', onNextStep)
+    sourcegraph.commands.registerCommand('codeTour.prevStepSameLocation', onPreviousStepSameLocation)
+    sourcegraph.commands.registerCommand('codeTour.nextStepSameLocation', onNextStepSameLocation)
+    // TODO: sourcegraph.commands.registerCommand('codeTour.completeTour', onCompleteTour)
 
     const panelView = sourcegraph.app.createPanelView('codeTour')
     panelView.title = 'Code Tour'
@@ -100,6 +112,52 @@ export function activate(context: sourcegraph.ExtensionContext): void {
     sourcegraph.workspace.rootChanges.subscribe(() => {
         onNewWorkspace().catch(() => {})
     })
+
+    // TODO: What if the next/prev step is not associated with a location change?
+    // Need a different type of "next step" action in context!
+    context.subscriptions.add(
+        from(sourcegraph.app.activeWindow!.activeViewComponentChanges)
+            .pipe(
+                switchMap(activeViewComponent => {
+                    if (activeViewComponent?.type === 'DirectoryViewer') {
+                        // Check if prev/next step are directory steps. extract step matcher fn
+                        // call step matcher
+                        return of(activeViewComponent.directory.uri)
+                    }
+
+                    if (activeViewComponent?.type === 'CodeEditor') {
+                        // Steps will have eitehr line or range
+
+                        return from(activeViewComponent.selectionsChanges).pipe(
+                            map(selections => {
+                                // call step matcher
+                                return selections
+                            })
+                        )
+                    }
+
+                    return EMPTY
+                })
+            )
+            .subscribe(matchedStep => {
+                console.log({ matchedStep, currentContext })
+                // This is where we should update panel state
+            })
+    )
+    /**
+     * Check whether the latest location matches either the previous or next step.
+     * If so, it's likely that the user clicked the "Previous step" or "Next step"
+     * actions, so update the panel and status bar.
+     */
+    function matchLocationToStep() {}
+
+    /**
+     * Builds relative path to be used as a link for "Previous step" or "Next step"
+     * panel action items.
+     */
+    // function buildRelativePathForStep() {}
+
+    function areStepLocationsSame(): boolean {}
 
     /**
      * Render step to panel and status bar
@@ -136,39 +194,54 @@ export function activate(context: sourcegraph.ExtensionContext): void {
             'codeTour.activeTourIndex': tourIndex,
             'codeTour.activeTourTitle': tour.title,
             'codeTour.tourStep': 0,
-            'codeTour.hasPrevStep': false,
-            'codeTour.hasNextStep': true,
+            'codeTour.showPrevStep': false,
+            'codeTour.showPrevStepSameLocation': false,
+            'codeTour.showNextStep': false,
+            'codeTour.showNextStepSameLocation': true,
         })
 
         // Render step to panel
         renderStep({ activeTourIndex: tourIndex, stepIndex: 0 })
     }
 
-    function onPreviousStep(activeTourIndexString: string, currentStepIndexString: string): void {
+    // TODO: Determine how to navigate between locations while updating panel state.
+    // Seem to be mutually exclusive if you use one button, since `open` opens in a new tab.
+    // Possible solution: "throw" web app to the next location, "catch" this location
+    // in the extension (thru combo of file and selection updates) and update panel if the update
+    // matches the expected location for the new step.
+
+    function onPreviousStepSameLocation(activeTourIndexString: string, currentStepIndexString: string): void {
         const activeTourIndex = parseInt(activeTourIndexString, 10)
         const previousStepIndex = parseInt(currentStepIndexString, 10) - 1
+        const nextStepIndex = parseInt(currentStepIndexString, 10) + 1
 
-        console.log('step', { activeTourIndex, previousStepIndex })
         renderStep({ activeTourIndex, stepIndex: previousStepIndex })
 
+        // Compare adjacent step locations
         updateContext({
             'codeTour.tourStep': previousStepIndex,
-            'codeTour.hasPrevStep': previousStepIndex > 0,
-            'codeTour.hasNextStep': true,
+            'codeTour.showPrevStep': false,
+            'codeTour.showPrevStepSameLocation': previousStepIndex > 0,
+            'codeTour.showNextStep': false,
+            'codeTour.showNextStepSameLocation': true,
         })
     }
 
-    function onNextStep(activeTourIndexString: string, currentStepIndexString: string): void {
+    function onNextStepSameLocation(activeTourIndexString: string, currentStepIndexString: string): void {
         const activeTourIndex = parseInt(activeTourIndexString, 10)
+        const previousStepIndex = parseInt(currentStepIndexString, 10) - 1
         const nextStepIndex = parseInt(currentStepIndexString, 10) + 1
 
-        console.log('step', { activeTourIndex, nextStepIndex })
         renderStep({ activeTourIndex, stepIndex: nextStepIndex })
 
+        // Compare adjacent step locations
         updateContext({
             'codeTour.tourStep': nextStepIndex,
-            'codeTour.hasPrevStep': true,
-            'codeTour.hasNextStep': currentRepoTours[activeTourIndex].tour.steps.length - 1 > nextStepIndex,
+            'codeTour.showPrevStep': false,
+            'codeTour.showPrevStepSameLocation': true,
+            'codeTour.showNextStep': false,
+            'codeTour.showNextStepSameLocation':
+                currentRepoTours[activeTourIndex].tour.steps.length - 1 > nextStepIndex,
         })
     }
 

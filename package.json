@@ -53,6 +53,17 @@
         }
       },
       {
+        "id": "codeTour.prevStepSameLocation",
+        "command": "codeTour.prevStepSameLocation",
+        "commandArguments": [
+          "${get(context, 'codeTour.activeTourIndex')}",
+          "${get(context, 'codeTour.tourStep')}"
+        ],
+        "actionItem": {
+          "label": "Previous step"
+        }
+      },
+      {
         "id": "codeTour.nextStep",
         "command": "codeTour.nextStep",
         "commandArguments": [
@@ -61,6 +72,27 @@
         ],
         "actionItem": {
           "label": "Next step"
+        }
+      },
+      {
+        "id": "codeTour.nextStepSameLocation",
+        "command": "codeTour.nextStepSameLocation",
+        "commandArguments": [
+          "${get(context, 'codeTour.activeTourIndex')}",
+          "${get(context, 'codeTour.tourStep')}"
+        ],
+        "actionItem": {
+          "label": "Next step"
+        }
+      },
+      {
+        "id": "codeTour.navigationTest",
+        "command": "open",
+        "commandArguments": [
+          "/github.com/microsoft/codetour/-/blob/src/player/index.ts?L436#tab=codeTour"
+        ],
+        "actionItem": {
+          "label": "Navigation test!"
         }
       }
     ],
@@ -82,11 +114,22 @@
         },
         {
           "action": "codeTour.prevStep",
-          "when": "get(context, 'codeTour.hasPrevStep')"
+          "when": "get(context, 'codeTour.showPrevStep')"
+        },
+        {
+          "action": "codeTour.prevStepSameLocation",
+          "when": "get(context, 'codeTour.showPrevStepSameLocation')"
         },
         {
           "action": "codeTour.nextStep",
-          "when": "get(context, 'codeTour.hasNextStep')"
+          "when": "get(context, 'codeTour.showNextStep')"
+        },
+        {
+          "action": "codeTour.nextStepSameLocation",
+          "when": "get(context, 'codeTour.showNextStepSameLocation')"
+        },
+        {
+          "action": "codeTour.navigationTest"
         }
       ],
       "commandPalette": []
@@ -142,6 +185,7 @@
     "typescript": "^4.3.5"
   },
   "dependencies": {
-    "json-schema-to-typescript": "^10.1.4"
+    "json-schema-to-typescript": "^10.1.4",
+    "rxjs": "^6.6.3"
   }
 }
