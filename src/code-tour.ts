@@ -86,7 +86,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
 
     sourcegraph.commands.registerCommand('codeTour.selectTour', onSelectTour)
     sourcegraph.commands.registerCommand('codeTour.startTour', onStartTour)
-    sourcegraph.commands.registerCommand('codeTour.prevStep', onPrevStep)
+    sourcegraph.commands.registerCommand('codeTour.prevStep', onPreviousStep)
     sourcegraph.commands.registerCommand('codeTour.nextStep', onNextStep)
 
     const panelView = sourcegraph.app.createPanelView('codeTour')
@@ -100,6 +100,26 @@ export function activate(context: sourcegraph.ExtensionContext): void {
     sourcegraph.workspace.rootChanges.subscribe(() => {
         onNewWorkspace().catch(() => {})
     })
+
+    /**
+     * Render step to panel and status bar
+     * TODO: Extract to test.
+     *
+     */
+    function renderStep({ activeTourIndex, stepIndex }: { activeTourIndex: number; stepIndex: number }): void {
+        const repoTour = currentRepoTours[activeTourIndex]
+        if (!repoTour) {
+            // render error?
+            return
+        }
+        const step = repoTour.tour.steps[stepIndex]
+        if (!step) {
+            // render error?
+            return
+        }
+        // TODO: optional title
+        panelView.content = step.description
+    }
 
     /**
      *
@@ -121,17 +141,38 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         })
 
         // Render step to panel
+        renderStep({ activeTourIndex: tourIndex, stepIndex: 0 })
     }
 
-    function onPrevStep(currentStep: number): void {
-        // TODO
+    function onPreviousStep(activeTourIndexString: string, currentStepIndexString: string): void {
+        const activeTourIndex = parseInt(activeTourIndexString, 10)
+        const previousStepIndex = parseInt(currentStepIndexString, 10) - 1
+
+        console.log('step', { activeTourIndex, previousStepIndex })
+        renderStep({ activeTourIndex, stepIndex: previousStepIndex })
+
+        updateContext({
+            'codeTour.tourStep': previousStepIndex,
+            'codeTour.hasPrevStep': previousStepIndex > 0,
+            'codeTour.hasNextStep': true,
+        })
     }
 
-    function onNextStep(activeTourIndex: number, currentStep: number): void {
-        // TODO
-        // const tour = currentRepoTours[]
-        console.log('step', { activeTourIndex, currentStep })
+    function onNextStep(activeTourIndexString: string, currentStepIndexString: string): void {
+        const activeTourIndex = parseInt(activeTourIndexString, 10)
+        const nextStepIndex = parseInt(currentStepIndexString, 10) + 1
+
+        console.log('step', { activeTourIndex, nextStepIndex })
+        renderStep({ activeTourIndex, stepIndex: nextStepIndex })
+
+        updateContext({
+            'codeTour.tourStep': nextStepIndex,
+            'codeTour.hasPrevStep': true,
+            'codeTour.hasNextStep': currentRepoTours[activeTourIndex].tour.steps.length - 1 > nextStepIndex,
+        })
     }
+
+    function onFinishTour(finishedTourTitle: string): void {}
 
     async function onSelectTour(): Promise<void> {
         if (!currentRepoTours || currentRepoTours.length === 0) {
