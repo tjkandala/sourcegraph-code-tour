@@ -13,13 +13,31 @@
     "actions": [
       {
         "id": "codeTour.openPanel",
-        "command": "codeTour.selectTour",
+        "command": "openPanel",
         "commandArguments": [
           "codeTour"
         ],
         "actionItem": {
           "label": "Open code tour panel",
           "iconURL": "https://vsls-contrib.gallerycdn.vsassets.io/extensions/vsls-contrib/codetour/0.0.58/1625784500119/Microsoft.VisualStudio.Services.Icons.Default"
+        }
+      },
+      {
+        "id": "codeTour.startTour",
+        "command": "codeTour.startTour",
+        "commandArguments": [
+          0
+        ],
+        "actionItem": {
+          "label": "Start code tour"
+        }
+      },
+      {
+        "id": "codeTour.selectTour",
+        "command": "codeTour.selectTour",
+        "commandArguments": [],
+        "actionItem": {
+          "label": "Select code tour"
         }
       }
     ],
@@ -28,6 +46,16 @@
         {
           "action": "codeTour.openPanel",
           "when": "get(context, `codeTour.workspaceHasTours`)"
+        }
+      ],
+      "panel/toolbar": [
+        {
+          "action": "codeTour.startTour",
+          "when": "codeTour.workspaceHasOneTour"
+        },
+        {
+          "action": "codeTour.selectTour",
+          "when": "codeTour.workspaceHasMultipleTours"
         }
       ],
       "commandPalette": []

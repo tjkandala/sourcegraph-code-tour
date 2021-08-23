@@ -39,36 +39,44 @@ interface RepoTour {
     tour: SchemaForCodeTourTourFiles
 }
 
-/** relative filepath -> tour */
-type RepoTours = Map<string, RepoTour>
-
 /**
  * Values used in context key expressions.
  *
  * Pass to `sourcegraph.internal.updateContext`.
  */
 interface CodeTourContext {
+    // TODO: better variables (union type)
     ['codeTour.workspaceHasTours']: boolean
+    ['codeTour.workspaceHasOneTour']: boolean
+    ['codeTour.workspaceHasMultipleTours']: boolean
+    // Out of `currentRepoTours`
+    ['codeTour.activeTourIndex']: number | null
+    ['codeTour.tourStep']: number | null
     [key: string]: string | number | boolean | null
 }
 
 /** Used to reset/initialize context */
 const nullContext: CodeTourContext = {
     'codeTour.workspaceHasTours': false,
+    'codeTour.workspaceHasOneTour': false,
+    'codeTour.workspaceHasMultipleTours': false,
+    'codeTour.activeTourIndex': null,
+    'codeTour.tourStep': null,
 }
 
 export function activate(context: sourcegraph.ExtensionContext): void {
     // TODO: If we want to add a recorder, move all this state + logic to a `Player` class.
 
     // repo URI to repo tours map
-    const tourCache = new Map<string, RepoTours>()
+    const tourCache = new Map<string, RepoTour[]>()
 
-    let currentRepoTours: RepoTours | null = null
+    let currentRepoTours: RepoTour[] = []
 
     // Used for request cancellation (TODO: can we just use switchMap?)
     let currentRequestID = 0
 
-    sourcegraph.commands.registerCommand('codeTour.selectTour', onCodeTourActionClicked)
+    sourcegraph.commands.registerCommand('codeTour.selectTour', onSelectTour)
+    sourcegraph.commands.registerCommand('codeTour.startTour', onStartTour)
 
     const panelView = sourcegraph.app.createPanelView('codeTour')
     panelView.title = 'Code Tour'
@@ -82,33 +90,45 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         onNewWorkspace().catch(() => {})
     })
 
-    async function onCodeTourActionClicked(): Promise<void> {
-        if (!currentRepoTours || currentRepoTours.size === 0) {
+    /**
+     *
+     * Called "in code" for multi-tour repos, called as an action item command for single-tour repos.
+     * Selects first tour by default
+     */
+    function onStartTour(tourIndex = 0): void {
+        const tour = currentRepoTours[tourIndex]
+        if (!tour) {
+            return
+        }
+        console.log('started tour!', tour)
+    }
+
+    async function onSelectTour(): Promise<void> {
+        if (!currentRepoTours || currentRepoTours.length === 0) {
             // This shouldn't be the case if this action was clickable, but validate regardless.
             return
         }
 
-        console.log('clicked code tour action', { currentRepoTours })
-        // If there's only one tour for this workspace, open the panel and start it now.
-        // Otherwise, show a promt w/ select (since such an element isn't exposed to extensions yet,
-        // simulate it with an input box)
-        if (currentRepoTours.size === 1) {
-            console.log('can start tour')
-        } else {
-            const repoToursArray = [...currentRepoTours]
+        // format prompt with repo tour names
+        const titles = currentRepoTours.map(repoTour => repoTour.tour.title).join('\n')
 
-            const userInput = await sourcegraph.app.activeWindow?.showInputBox({
-                prompt: 'Which tour do you want to start? Input the number',
-                value: '1',
-            })
-            if (!userInput) {
-                // The user escaped, don't start a tour
-                return
-            }
-            // Validate that it is a number in range
+        const userInput = await sourcegraph.app.activeWindow?.showInputBox({
+            prompt: 'Which tour do you want to start? Input the number\n\n' + titles,
+            value: '1',
+        })
+        if (!userInput) {
+            // The user escaped, don't start a tour
+            return
+        }
+
+        // Validate that it is a number in range
+        try {
             const choice = parseInt(userInput, 10)
-
-            console.log({ userInput })
+            onStartTour(choice - 1)
+        } catch (error) {
+            console.error(error)
+            // Not a valid choice. Show notification to user?
+            return
         }
     }
 
@@ -118,19 +138,41 @@ export function activate(context: sourcegraph.ExtensionContext): void {
             // Reset context from previous workspaces/tours
             sourcegraph.internal.updateContext(nullContext)
 
-            const repoTours = await getTours()
+            const repoTours = (await getTours()) ?? []
 
             if (requestID === currentRequestID) {
                 currentRepoTours = repoTours
+
+                // Populate panel. If there are multiple tours, add "select tour to play" action.
+                // Otherwise, just show the start of the tour?
+
+                if (repoTours.length > 1) {
+                    let content = '## Available code tours\n'
+
+                    content += repoTours
+                        .map(({ tour }) => `1. **${tour.title}**` + (tour.description ? `\n${tour.description}\n` : ''))
+                        .join('\n')
+
+                    panelView.content = content
+                } else if (repoTours.length === 1) {
+                    panelView.content =
+                        `## ${repoTours[0].tour.title}` +
+                        (repoTours[0].tour.description ? `\n${repoTours[0].tour.description}\n` : '')
+                }
+
                 // Update context
 
                 const newContext: CodeTourContext = {
-                    'codeTour.workspaceHasTours': repoTours ? repoTours.size > 0 : false,
+                    'codeTour.workspaceHasTours': repoTours.length > 0,
+                    'codeTour.workspaceHasOneTour': repoTours.length === 1,
+                    'codeTour.workspaceHasMultipleTours': repoTours.length > 1,
+                    'codeTour.activeTourIndex': null,
+                    'codeTour.tourStep': null,
                 }
 
                 sourcegraph.internal.updateContext(newContext)
 
-                console.log({ requestID, currentRequestID, repoTours, size: repoTours?.size })
+                console.log({ requestID, currentRequestID, repoTours, newContext })
             }
         } catch {
             // noop TODO
@@ -151,7 +193,7 @@ interface SearchResult {
  * If there are tours for this repo, the action item will be enabled.
  * Otherwise, it will be disabled.
  */
-async function getTours(): Promise<RepoTours | null> {
+async function getTours(): Promise<RepoTour[] | null> {
     try {
         const repository = getRepositoryFromRoots()
         if (!repository) {
@@ -168,19 +210,21 @@ async function getTours(): Promise<RepoTours | null> {
             return null
         }
 
-        const toursByFile = tourFiles.reduce<Record<string, RepoTour>>((repoTours, tourFile) => {
-            try {
-                const tour: SchemaForCodeTourTourFiles = JSON.parse(tourFiles[0].content)
+        return tourFiles
+            .map(tourFile => {
+                try {
+                    const tour: SchemaForCodeTourTourFiles = JSON.parse(tourFile.content)
 
-                repoTours[tourFile.path] = { ...tourFile, tour }
-                return repoTours
-            } catch {
-                // invalid tour?
-                return repoTours
-            }
-        }, {})
-
-        return new Map(Object.entries(toursByFile))
+                    // TODO: git ref association. don't display tours that aren't valid
+                    // at this commit
+                    const repoTour: RepoTour = { ...tourFile, tour }
+                    return repoTour
+                } catch {
+                    // invalid tour?
+                    return null
+                }
+            })
+            .filter((tour): tour is Exclude<RepoTour | null, null> => tour !== null)
     } catch (error) {
         console.error(error)
         return null
