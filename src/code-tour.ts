@@ -29,11 +29,27 @@ const tourFilesQuery = `query TourFiles($searchQuery: String) {
         }
       }`
 
-export function activate(context: sourcegraph.ExtensionContext): void {
-    // repo URI to tour filenames (or possibly the whole file?)
-    const toursByRepo = new Map<string, string[]>()
+type RepoTour = {
+    /** File name */
+    name: string
 
-    let currentRepoTours: any = undefined
+    /** File path */
+    path: string
+
+    tour: SchemaForCodeTourTourFiles
+}
+
+/** relative filepath -> tour */
+type RepoTours = Map<string, RepoTour>
+
+export function activate(context: sourcegraph.ExtensionContext): void {
+    // repo URI to repo tours map
+    const tourCache = new Map<string, RepoTours>()
+
+    let currentRepoTours: RepoTour | null = null
+
+    // Used for request cancellation (TODO: can we just use switchMap?)
+    let currentRequestID = 0
 
     sourcegraph.commands.registerCommand('codeTour.selectTour', onCodeTourActionClicked)
 
@@ -44,28 +60,33 @@ export function activate(context: sourcegraph.ExtensionContext): void {
     // TODO: status bar item to keep track of tour, reopen panel
 
     // search for tour files on activation and whenever the opened repository changes.
-    getTours()
-        .then(tours => {
-            currentRepoTours = tours
-        })
-        .catch(() => {
-            // noop TODO
-        })
+    onNewWorkspace().catch(() => {})
     sourcegraph.workspace.rootChanges.subscribe(() => {
-        getTours()
-            .then(tours => {
-                // TODO cancellation (without switchmap)
-                currentRepoTours = tours
-            })
-            .catch(() => {
-                // noop TODO
-            })
+        onNewWorkspace().catch(() => {})
     })
 
     function onCodeTourActionClicked(): void {
         console.log('clicked code tour action', { currentRepoTours })
         // If there's only one tour for this workspace, open the panel and start it now.
         // Otherwise,
+    }
+
+    async function onNewWorkspace(): Promise<void> {
+        const requestID = ++currentRequestID
+        try {
+            // Reset context from previous workspaces/tours
+
+            const repoTours = await getTours()
+
+            if (requestID === currentRequestID) {
+                currentRepoTours = repoTours
+                // Update context
+
+                console.log({ requestID, currentRequestID, repoTours })
+            }
+        } catch {
+            // noop TODO
+        }
     }
 }
 
@@ -82,7 +103,7 @@ interface SearchResult {
  * If there are tours for this repo, the action item will be enabled.
  * Otherwise, it will be disabled.
  */
-async function getTours() {
+async function getTours(): Promise<RepoTours | null> {
     try {
         const repository = getRepositoryFromRoots()
         if (!repository) {
@@ -96,18 +117,25 @@ async function getTours() {
         const tourFiles = result.data?.search.results.results.map(result => result.file)
 
         if (!tourFiles || !tourFiles[0]) {
-            return
+            return null
         }
 
-        // parse each tour file. add valid files to map
-        // TODO handle multiple tour files
-        const tour: SchemaForCodeTourTourFiles = JSON.parse(tourFiles[0].content)
-        tour.steps.map(step => console.log(step.file))
-        console.log({ tour })
+        const toursByFile = tourFiles.reduce<Record<string, RepoTour>>((repoTours, tourFile) => {
+            try {
+                const tour: SchemaForCodeTourTourFiles = JSON.parse(tourFiles[0].content)
 
-        return tourFiles
+                repoTours[tourFile.path] = { ...tourFile, tour }
+                return repoTours
+            } catch {
+                // invalid tour?
+                return repoTours
+            }
+        }, {})
+
+        return new Map(Object.entries(toursByFile))
     } catch (error) {
         console.error(error)
+        return null
     }
 }
 
