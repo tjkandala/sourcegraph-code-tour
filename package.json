@@ -25,7 +25,10 @@
     ],
     "menus": {
       "editor/title": [
-        {"action": "codeTour.openPanel"}
+        {
+          "action": "codeTour.openPanel",
+          "when": "get(context, `codeTour.workspaceHasTours`)"
+        }
       ],
       "commandPalette": []
     },

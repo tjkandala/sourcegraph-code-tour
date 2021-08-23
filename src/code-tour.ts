@@ -29,7 +29,7 @@ const tourFilesQuery = `query TourFiles($searchQuery: String) {
         }
       }`
 
-type RepoTour = {
+interface RepoTour {
     /** File name */
     name: string
 
@@ -42,11 +42,28 @@ type RepoTour = {
 /** relative filepath -> tour */
 type RepoTours = Map<string, RepoTour>
 
+/**
+ * Values used in context key expressions.
+ *
+ * Pass to `sourcegraph.internal.updateContext`.
+ */
+interface CodeTourContext {
+    ['codeTour.workspaceHasTours']: boolean
+    [key: string]: string | number | boolean | null
+}
+
+/** Used to reset/initialize context */
+const nullContext: CodeTourContext = {
+    'codeTour.workspaceHasTours': false,
+}
+
 export function activate(context: sourcegraph.ExtensionContext): void {
+    // TODO: If we want to add a recorder, move all this state + logic to a `Player` class.
+
     // repo URI to repo tours map
     const tourCache = new Map<string, RepoTours>()
 
-    let currentRepoTours: RepoTour | null = null
+    let currentRepoTours: RepoTours | null = null
 
     // Used for request cancellation (TODO: can we just use switchMap?)
     let currentRequestID = 0
@@ -65,16 +82,41 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         onNewWorkspace().catch(() => {})
     })
 
-    function onCodeTourActionClicked(): void {
+    async function onCodeTourActionClicked(): Promise<void> {
+        if (!currentRepoTours || currentRepoTours.size === 0) {
+            // This shouldn't be the case if this action was clickable, but validate regardless.
+            return
+        }
+
         console.log('clicked code tour action', { currentRepoTours })
         // If there's only one tour for this workspace, open the panel and start it now.
-        // Otherwise,
+        // Otherwise, show a promt w/ select (since such an element isn't exposed to extensions yet,
+        // simulate it with an input box)
+        if (currentRepoTours.size === 1) {
+            console.log('can start tour')
+        } else {
+            const repoToursArray = [...currentRepoTours]
+
+            const userInput = await sourcegraph.app.activeWindow?.showInputBox({
+                prompt: 'Which tour do you want to start? Input the number',
+                value: '1',
+            })
+            if (!userInput) {
+                // The user escaped, don't start a tour
+                return
+            }
+            // Validate that it is a number in range
+            const choice = parseInt(userInput, 10)
+
+            console.log({ userInput })
+        }
     }
 
     async function onNewWorkspace(): Promise<void> {
         const requestID = ++currentRequestID
         try {
             // Reset context from previous workspaces/tours
+            sourcegraph.internal.updateContext(nullContext)
 
             const repoTours = await getTours()
 
@@ -82,7 +124,13 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                 currentRepoTours = repoTours
                 // Update context
 
-                console.log({ requestID, currentRequestID, repoTours })
+                const newContext: CodeTourContext = {
+                    'codeTour.workspaceHasTours': repoTours ? repoTours.size > 0 : false,
+                }
+
+                sourcegraph.internal.updateContext(newContext)
+
+                console.log({ requestID, currentRequestID, repoTours, size: repoTours?.size })
             }
         } catch {
             // noop TODO
