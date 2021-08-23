@@ -51,8 +51,10 @@ interface CodeTourContext {
     ['codeTour.workspaceHasMultipleTours']: boolean
     // Out of `currentRepoTours`
     ['codeTour.activeTourIndex']: number | null
+    ['codeTour.activeTourTitle']: string | null
     ['codeTour.tourStep']: number | null
-    [key: string]: string | number | boolean | null
+    ['codeTour.hasPrevStep']: boolean | null
+    ['codeTour.hasNextStep']: boolean | null // Show "complete tour" action when false
 }
 
 /** Used to reset/initialize context */
@@ -61,7 +63,14 @@ const nullContext: CodeTourContext = {
     'codeTour.workspaceHasOneTour': false,
     'codeTour.workspaceHasMultipleTours': false,
     'codeTour.activeTourIndex': null,
+    'codeTour.activeTourTitle': null,
     'codeTour.tourStep': null,
+    'codeTour.hasPrevStep': null,
+    'codeTour.hasNextStep': null,
+}
+
+function updateContext(partialContext: Partial<CodeTourContext>): void {
+    sourcegraph.internal.updateContext(partialContext as sourcegraph.ContextValues)
 }
 
 export function activate(context: sourcegraph.ExtensionContext): void {
@@ -77,6 +86,8 @@ export function activate(context: sourcegraph.ExtensionContext): void {
 
     sourcegraph.commands.registerCommand('codeTour.selectTour', onSelectTour)
     sourcegraph.commands.registerCommand('codeTour.startTour', onStartTour)
+    sourcegraph.commands.registerCommand('codeTour.prevStep', onPrevStep)
+    sourcegraph.commands.registerCommand('codeTour.nextStep', onNextStep)
 
     const panelView = sourcegraph.app.createPanelView('codeTour')
     panelView.title = 'Code Tour'
@@ -92,15 +103,34 @@ export function activate(context: sourcegraph.ExtensionContext): void {
 
     /**
      *
-     * Called "in code" for multi-tour repos, called as an action item command for single-tour repos.
+     * Called "in code" for multi-tour repos, called as a panel action item command for single-tour repos.
      * Selects first tour by default
      */
     function onStartTour(tourIndex = 0): void {
-        const tour = currentRepoTours[tourIndex]
+        const { tour } = currentRepoTours[tourIndex] || {}
         if (!tour) {
             return
         }
         console.log('started tour!', tour)
+        updateContext({
+            'codeTour.activeTourIndex': tourIndex,
+            'codeTour.activeTourTitle': tour.title,
+            'codeTour.tourStep': 0,
+            'codeTour.hasPrevStep': false,
+            'codeTour.hasNextStep': true,
+        })
+
+        // Render step to panel
+    }
+
+    function onPrevStep(currentStep: number): void {
+        // TODO
+    }
+
+    function onNextStep(activeTourIndex: number, currentStep: number): void {
+        // TODO
+        // const tour = currentRepoTours[]
+        console.log('step', { activeTourIndex, currentStep })
     }
 
     async function onSelectTour(): Promise<void> {
@@ -121,10 +151,11 @@ export function activate(context: sourcegraph.ExtensionContext): void {
             return
         }
 
-        // Validate that it is a number in range
         try {
-            const choice = parseInt(userInput, 10)
-            onStartTour(choice - 1)
+            const tourIndex = parseInt(userInput, 10) - 1
+
+            // TODO: Validate that it is a number in range
+            onStartTour(tourIndex)
         } catch (error) {
             console.error(error)
             // Not a valid choice. Show notification to user?
@@ -136,7 +167,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         const requestID = ++currentRequestID
         try {
             // Reset context from previous workspaces/tours
-            sourcegraph.internal.updateContext(nullContext)
+            updateContext(nullContext)
 
             const repoTours = (await getTours()) ?? []
 
@@ -162,17 +193,16 @@ export function activate(context: sourcegraph.ExtensionContext): void {
 
                 // Update context
 
-                const newContext: CodeTourContext = {
+                updateContext({
                     'codeTour.workspaceHasTours': repoTours.length > 0,
                     'codeTour.workspaceHasOneTour': repoTours.length === 1,
                     'codeTour.workspaceHasMultipleTours': repoTours.length > 1,
                     'codeTour.activeTourIndex': null,
+                    'codeTour.activeTourTitle': null,
                     'codeTour.tourStep': null,
-                }
+                })
 
-                sourcegraph.internal.updateContext(newContext)
-
-                console.log({ requestID, currentRequestID, repoTours, newContext })
+                console.log({ requestID, currentRequestID, repoTours })
             }
         } catch {
             // noop TODO

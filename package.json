@@ -19,7 +19,8 @@
         ],
         "actionItem": {
           "label": "Open code tour panel",
-          "iconURL": "https://vsls-contrib.gallerycdn.vsassets.io/extensions/vsls-contrib/codetour/0.0.58/1625784500119/Microsoft.VisualStudio.Services.Icons.Default"
+          "iconURL": "https://vsls-contrib.gallerycdn.vsassets.io/extensions/vsls-contrib/codetour/0.0.58/1625784500119/Microsoft.VisualStudio.Services.Icons.Default",
+          "description": "${get(context, 'codeTour.activeTourTitle') && `Current tour: ${get(context, 'codeTour.activeTourTitle')}` || 'Open the code tour panel'}"
         }
       },
       {
@@ -39,6 +40,28 @@
         "actionItem": {
           "label": "Select code tour"
         }
+      },
+      {
+        "id": "codeTour.prevStep",
+        "command": "codeTour.prevStep",
+        "commandArguments": [
+          "${get(context, 'codeTour.activeTourIndex')}",
+          "${get(context, 'codeTour.tourStep')}"
+        ],
+        "actionItem": {
+          "label": "Previous step"
+        }
+      },
+      {
+        "id": "codeTour.nextStep",
+        "command": "codeTour.nextStep",
+        "commandArguments": [
+          "${get(context, 'codeTour.activeTourIndex')}",
+          "${get(context, 'codeTour.tourStep')}"
+        ],
+        "actionItem": {
+          "label": "Next step"
+        }
       }
     ],
     "menus": {
@@ -51,11 +74,19 @@
       "panel/toolbar": [
         {
           "action": "codeTour.startTour",
-          "when": "codeTour.workspaceHasOneTour"
+          "when": "get(context, 'codeTour.workspaceHasOneTour') && !get(context, 'codeTour.activeTourTitle')"
         },
         {
           "action": "codeTour.selectTour",
-          "when": "codeTour.workspaceHasMultipleTours"
+          "when": "get(context, 'codeTour.workspaceHasMultipleTours') && !get(context, 'codeTour.activeTourTitle')"
+        },
+        {
+          "action": "codeTour.prevStep",
+          "when": "get(context, 'codeTour.hasPrevStep')"
+        },
+        {
+          "action": "codeTour.nextStep",
+          "when": "get(context, 'codeTour.hasNextStep')"
         }
       ],
       "commandPalette": []
