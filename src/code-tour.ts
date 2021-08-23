@@ -157,7 +157,62 @@ export function activate(context: sourcegraph.ExtensionContext): void {
      */
     // function buildRelativePathForStep() {}
 
-    function areStepLocationsSame(): boolean {}
+    /**
+     * Used to determine whether "Previous step" or "Next step" actions are links to different locations
+     * or trigger commands to update the panel.
+     *
+     * Call this when:
+     * - Starting code tour
+     * - Clicked prev or next step action for same location
+     * - We determine that the user clicked a location-changing prev or next step action, so we can update context
+     */
+    function isStepLocationSame({
+        activeTourIndex,
+        baseStepIndex,
+        newStepIndex,
+    }: {
+        activeTourIndex: number
+        baseStepIndex: number
+        newStepIndex: number
+    }): boolean {
+        const { tour } = currentRepoTours[activeTourIndex]
+        const baseStep = tour.steps[baseStepIndex]
+        const newStep = tour.steps[newStepIndex]
+        console.log({ baseStep, newStep })
+        const baseStepType: StepType = determineStepType(baseStep)
+        const newStepType: StepType = determineStepType(newStep)
+
+        if (baseStepType !== newStepType) {
+            if (newStepType === 'content') {
+                return true // There's nowhere to link to, treat it like the location is the same.
+            }
+
+            // We don't need to do any futher comparison
+            return false
+        }
+
+        switch (baseStepType) {
+            case 'line':
+                return baseStep.line === newStep.line
+
+            case 'directory':
+                return baseStep.directory === newStep.directory
+
+            case 'selection':
+                return (
+                    baseStep.selection?.start.line === newStep.selection?.start.line &&
+                    baseStep.selection?.start.character === newStep.selection?.start.character &&
+                    baseStep.selection?.end.line === newStep.selection?.end.line &&
+                    baseStep.selection?.end.character === newStep.selection?.end.character
+                )
+
+            case 'content':
+                // Content steps should be rendered in the same location.
+                return true
+        }
+
+        // TODO: consider pattern
+    }
 
     /**
      * Render step to panel and status bar
@@ -215,7 +270,27 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         const previousStepIndex = parseInt(currentStepIndexString, 10) - 1
         const nextStepIndex = parseInt(currentStepIndexString, 10) + 1
 
+        let prevStepSameLocation: boolean | undefined
+        let nextStepSameLocation: boolean | undefined
+
         renderStep({ activeTourIndex, stepIndex: previousStepIndex })
+
+        // Determine what the "Previous step" button should do once the step has been updated.
+        if (previousStepIndex - 1 >= 0) {
+            prevStepSameLocation = isStepLocationSame({
+                activeTourIndex,
+                baseStepIndex: previousStepIndex,
+                newStepIndex: previousStepIndex - 1,
+            })
+        }
+        // Determine what the "Next step" button should do once the step has been updated.
+        nextStepSameLocation = isStepLocationSame({
+            activeTourIndex,
+            baseStepIndex: previousStepIndex,
+            newStepIndex: previousStepIndex + 1,
+        })
+
+        console.log({ previousStepIndex, prevStepSameLocation, nextStepSameLocation })
 
         // Compare adjacent step locations
         updateContext({
@@ -232,7 +307,27 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         const previousStepIndex = parseInt(currentStepIndexString, 10) - 1
         const nextStepIndex = parseInt(currentStepIndexString, 10) + 1
 
+        let prevStepSameLocation: boolean | undefined
+        let nextStepSameLocation: boolean | undefined
+
         renderStep({ activeTourIndex, stepIndex: nextStepIndex })
+
+        // Determine what the "Previous step" button should do once the step has been updated.
+        prevStepSameLocation = isStepLocationSame({
+            activeTourIndex,
+            baseStepIndex: nextStepIndex,
+            newStepIndex: nextStepIndex - 1,
+        })
+        // Determine what the "Next step" button should do once the step has been updated.
+        if (currentRepoTours[activeTourIndex].tour.steps.length > nextStepIndex + 1) {
+            nextStepSameLocation = isStepLocationSame({
+                activeTourIndex,
+                baseStepIndex: nextStepIndex,
+                newStepIndex: nextStepIndex + 1,
+            })
+        }
+
+        console.log({ nextStepIndex, prevStepSameLocation, nextStepSameLocation })
 
         // Compare adjacent step locations
         updateContext({
@@ -373,6 +468,24 @@ async function getTours(): Promise<RepoTour[] | null> {
         console.error(error)
         return null
     }
+}
+
+type StepType = 'line' | 'directory' | 'selection' | 'content'
+
+function determineStepType(step: SchemaForCodeTourTourFiles['steps'][number]): StepType {
+    if (typeof step.line === 'number') {
+        return 'line'
+    }
+
+    if (step.directory) {
+        return 'directory'
+    }
+
+    if (step.selection) {
+        return 'selection'
+    }
+
+    return 'content'
 }
 
 function getRepositoryFromRoots(): string | null {
