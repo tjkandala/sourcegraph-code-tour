@@ -109,32 +109,27 @@ export function activate(context: sourcegraph.ExtensionContext): void {
     panelView.title = 'Code Tour'
     panelView.content = 'LOADING...'
 
-    // search for tour files on activation and whenever the opened repository changes.
+    // Search for tour files on activation and whenever the opened repository changes.
     onNewWorkspace().catch(() => {})
     sourcegraph.workspace.rootChanges.subscribe(() => {
         onNewWorkspace().catch(() => {})
     })
 
-    // TODO: What if the next/prev step is not associated with a location change?
-    // Need a different type of "next step" action in context!
+    // Observe location changes to see if it may be a result of step navigation.
     context.subscriptions.add(
         from(sourcegraph.app.activeWindow!.activeViewComponentChanges)
             .pipe(
                 switchMap(activeViewComponent => {
                     if (activeViewComponent?.type === 'DirectoryViewer') {
-                        // Check if prev/next step are directory steps. extract step matcher fn
-                        // call step matcher
                         return of({ type: 'tree' as const, uri: activeViewComponent.directory.uri })
                     }
 
                     if (activeViewComponent?.type === 'CodeEditor') {
-                        // Steps will have eitehr line or range
-
                         return from(activeViewComponent.selectionsChanges).pipe(
-                            map(selections => ({
+                            map(() => ({
                                 type: 'blob' as const,
                                 uri: activeViewComponent.document.uri,
-                                selections,
+                                selection: activeViewComponent.selection,
                             }))
                         )
                     }
@@ -160,7 +155,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
             | {
                   type: 'blob'
                   uri: string
-                  selections: sourcegraph.Selection[]
+                  selection: sourcegraph.Selection | null
               }
     ): void {
         const activeTourIndex = currentContext['codeTour.activeTourIndex']
@@ -229,7 +224,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                                   )
                               )
 
-                    const isEqual = locationUpdate.selections[0].isEqual(stepRange)
+                    const isEqual = locationUpdate.selection?.isEqual(stepRange)
 
                     if (isEqual) {
                         matchedStepAction = action
@@ -498,8 +493,6 @@ export function activate(context: sourcegraph.ExtensionContext): void {
 
         try {
             const tourIndex = parseInt(userInput, 10) - 1
-
-            // TODO: Validate that it is a number in range
             onStartTour(tourIndex)
         } catch (error) {
             console.error(error)
@@ -535,8 +528,6 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                         `## ${repoTours[0].tour.title}` +
                         (repoTours[0].tour.description ? `\n${repoTours[0].tour.description}\n` : '')
                 }
-
-                // Update context
 
                 updateContext({
                     'codeTour.workspaceHasTours': repoTours.length > 0,
