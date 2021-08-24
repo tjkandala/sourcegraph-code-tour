@@ -2,7 +2,7 @@ import { EMPTY, from, of } from 'rxjs'
 import { map, switchMap } from 'rxjs/operators'
 import * as sourcegraph from 'sourcegraph'
 import { SchemaForCodeTourTourFiles } from './codeTour'
-import { createRelativeSourcegraphURL } from './location'
+import { createRelativeSourcegraphURL, parseRepoURI } from './location'
 
 /**
  * Creates the search query used to find code tour directories within a repository.
@@ -84,9 +84,8 @@ const nullContext: CodeTourContext = {
 
 export function activate(context: sourcegraph.ExtensionContext): void {
     // TODO: If we want to add a recorder, move all this state + logic to a `Player` class.
-
-    // repo URI to repo tours map
-    const tourCache = new Map<string, RepoTour[]>()
+    // TODO: potentially cache tours by repo
+    // TODO: status bar item to keep track of tour, reopen panel
 
     let currentRepoTours: RepoTour[] = []
 
@@ -110,8 +109,6 @@ export function activate(context: sourcegraph.ExtensionContext): void {
     panelView.title = 'Code Tour'
     panelView.content = 'LOADING...'
 
-    // TODO: status bar item to keep track of tour, reopen panel
-
     // search for tour files on activation and whenever the opened repository changes.
     onNewWorkspace().catch(() => {})
     sourcegraph.workspace.rootChanges.subscribe(() => {
@@ -134,10 +131,11 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                         // Steps will have eitehr line or range
 
                         return from(activeViewComponent.selectionsChanges).pipe(
-                            map(selections => {
-                                // call step matcher
-                                return { type: 'blob' as const, uri: activeViewComponent.document.uri, selections }
-                            })
+                            map(selections => ({
+                                type: 'blob' as const,
+                                uri: activeViewComponent.document.uri,
+                                selections,
+                            }))
                         )
                     }
 
@@ -145,15 +143,13 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                 })
             )
             .subscribe(locationUpdate => {
-                console.log({ locationUpdate, currentContext })
                 onLocationUpdate(locationUpdate)
-                // This is where we should update panel state
             })
     )
     /**
      * Check whether the latest location matches either the previous or next step.
      * If so, it's likely that the user clicked the "Previous step" or "Next step"
-     * actions, so update the panel, status bar, context (for action items).
+     * actions, so handle that step (rendering, context updates, etc).
      */
     function onLocationUpdate(
         locationUpdate:
@@ -197,7 +193,11 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                 if (stepType !== 'directory') {
                     continue
                 }
-                // TODO match
+                // TODO unify with files by using parseRepoURI
+                if (locationUpdate.uri.hash.slice(1) === step.directory!) {
+                    matchedStepAction = action
+                    break
+                }
             } else {
                 if (stepType === 'directory') {
                     continue
@@ -238,17 +238,11 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                 }
             }
         }
-        console.log({ matchedStepAction })
+
         if (matchedStepAction !== null) {
             onStepUpdate({ activeTourIndex, currentStepIndex, action: matchedStepAction })
         }
     }
-
-    /**
-     * Builds relative path to be used as a link for "Previous step" or "Next step"
-     * panel action items.
-     */
-    // function buildRelativePathForStep() {}
 
     /**
      * Used to determine whether "Previous step" or "Next step" actions are links to different locations
@@ -271,13 +265,53 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         const { tour } = currentRepoTours[activeTourIndex]
         const baseStep = tour.steps[baseStepIndex]
         const newStep = tour.steps[newStepIndex]
-        console.log({ baseStep, newStep })
+
         const baseStepType: StepType = determineStepType(baseStep)
         const newStepType: StepType = determineStepType(newStep)
 
         if (baseStepType !== newStepType) {
             if (newStepType === 'content') {
                 return true // There's nowhere to link to, treat it like the location is the same.
+            }
+
+            if (baseStepType === 'content') {
+                // Check if the current location is the same as the new step location.
+                // This can happen if, for example, the user navigates to a line step and back to a content step.
+                // The panel should update without a location change on action.
+
+                if (newStepType === 'directory') {
+                    const maybeDirectoryView = sourcegraph.app.activeWindow!.activeViewComponent
+                    if (maybeDirectoryView && maybeDirectoryView.type === 'DirectoryViewer') {
+                        // TODO unify with files by using parseRepoURI
+                        return newStep.directory === maybeDirectoryView.directory.uri.hash.slice(1)
+                    }
+                } else {
+                    const maybeCodeEditor = sourcegraph.app.activeWindow!.activeViewComponent
+                    if (maybeCodeEditor && maybeCodeEditor.type === 'CodeEditor') {
+                        const { filePath } = parseRepoURI(maybeCodeEditor.document.uri)
+
+                        if (newStepType === 'file') {
+                            return filePath === newStep.file!
+                        }
+                        if (newStepType === 'line') {
+                            // Ensure that the selection is not a range.
+                            return !!(
+                                maybeCodeEditor.selection?.isSingleLine &&
+                                // Editor positions are 1-indexed
+                                maybeCodeEditor.selection.start.line + 1 === newStep.line!
+                            )
+                        }
+                        if (newStepType === 'selection' && maybeCodeEditor.selection) {
+                            return (
+                                // Editor positions are 1-indexed
+                                maybeCodeEditor.selection.start.character + 1 === newStep.selection?.start.character &&
+                                maybeCodeEditor.selection.start.character + 1 === newStep.selection?.start.character &&
+                                maybeCodeEditor.selection.end.line + 1 === newStep.selection?.end.line &&
+                                maybeCodeEditor.selection.end.character + 1 === newStep.selection?.end.character
+                            )
+                        }
+                    }
+                }
             }
 
             // We don't need to do any futher comparison
@@ -340,19 +374,6 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         if (!tour) {
             return
         }
-        console.log('started tour!', tour)
-        // updateContext({
-        //     'codeTour.activeTourIndex': tourIndex,
-        //     'codeTour.activeTourTitle': tour.title,
-        //     'codeTour.tourStep': 0,
-        //     'codeTour.showPrevStepNewLocation': false,
-        //     'codeTour.showPrevStepSameLocation': false,
-        //     'codeTour.showNextStepNewLocation': false, // TODO determine.
-        //     'codeTour.showNextStepSameLocation': true,
-        // })
-
-        // // Render step to panel
-        // renderStep({ activeTourIndex: tourIndex, stepIndex: 0 })
 
         updateContext({
             'codeTour.activeTourIndex': tourIndex,
@@ -360,12 +381,6 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         })
         onStepUpdate({ activeTourIndex: tourIndex, currentStepIndex: -1, action: 'next' })
     }
-
-    // TODO: Determine how to navigate between locations while updating panel state.
-    // Seem to be mutually exclusive if you use one button, since `open` opens in a new tab.
-    // Possible solution: "throw" web app to the next location, "catch" this location
-    // in the extension (thru combo of file and selection updates) and update panel if the update
-    // matches the expected location for the new step.
 
     /**
      * Shared between all step updates, whether in the same location or a new location
@@ -458,7 +473,10 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         onStepUpdate({ activeTourIndex, currentStepIndex, action: 'next' })
     }
 
-    function onFinishTour(finishedTourTitle: string): void {}
+    function onFinishTour(finishedTourTitle: string): void {
+        updateContext(nullContext)
+        panelView.content = 'TODO'
+    }
 
     async function onSelectTour(): Promise<void> {
         if (!currentRepoTours || currentRepoTours.length === 0) {
@@ -528,8 +546,6 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                     'codeTour.activeTourTitle': null,
                     'codeTour.tourStep': null,
                 })
-
-                console.log({ requestID, currentRequestID, repoTours })
             }
         } catch {
             // noop TODO
@@ -556,7 +572,6 @@ async function getTours(): Promise<RepoTour[] | null> {
         if (!repository) {
             return null
         }
-        console.log({ repository })
         const result = await sourcegraph.graphQL.execute<SearchResult, { searchQuery: string }>(tourFilesQuery, {
             searchQuery: createToursDirectoryQuery(repository),
         })
