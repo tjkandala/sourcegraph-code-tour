@@ -2,6 +2,7 @@ import { EMPTY, from, of } from 'rxjs'
 import { map, switchMap } from 'rxjs/operators'
 import * as sourcegraph from 'sourcegraph'
 import { SchemaForCodeTourTourFiles } from './codeTour'
+import { createRelativeSourcegraphURL } from './location'
 
 /**
  * Creates the search query used to find code tour directories within a repository.
@@ -55,9 +56,11 @@ interface CodeTourContext {
     ['codeTour.activeTourIndex']: number | null
     ['codeTour.activeTourTitle']: string | null
     ['codeTour.tourStep']: number | null
-    ['codeTour.showPrevStep']: boolean | null
+    ['codeTour.showPrevStepNewLocation']: boolean | null
+    ['codeTour.prevStepURL']: string | null
     ['codeTour.showPrevStepSameLocation']: boolean | null
-    ['codeTour.showNextStep']: boolean | null
+    ['codeTour.showNextStepNewLocation']: boolean | null
+    ['codeTour.nextStepURL']: string | null
     ['codeTour.showNextStepSameLocation']: boolean | null
     ['codeTour.showCompleteTour']: boolean | null
 }
@@ -70,9 +73,11 @@ const nullContext: CodeTourContext = {
     'codeTour.activeTourIndex': null,
     'codeTour.activeTourTitle': null,
     'codeTour.tourStep': null,
-    'codeTour.showPrevStep': null,
+    'codeTour.showPrevStepNewLocation': null,
+    'codeTour.prevStepURL': null,
     'codeTour.showPrevStepSameLocation': null,
-    'codeTour.showNextStep': null,
+    'codeTour.showNextStepNewLocation': null,
+    'codeTour.nextStepURL': null,
     'codeTour.showNextStepSameLocation': null,
     'codeTour.showCompleteTour': null,
 }
@@ -122,7 +127,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                     if (activeViewComponent?.type === 'DirectoryViewer') {
                         // Check if prev/next step are directory steps. extract step matcher fn
                         // call step matcher
-                        return of(activeViewComponent.directory.uri)
+                        return of({ type: 'tree' as const, uri: activeViewComponent.directory.uri })
                     }
 
                     if (activeViewComponent?.type === 'CodeEditor') {
@@ -131,7 +136,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                         return from(activeViewComponent.selectionsChanges).pipe(
                             map(selections => {
                                 // call step matcher
-                                return selections
+                                return { type: 'blob' as const, uri: activeViewComponent.document.uri, selections }
                             })
                         )
                     }
@@ -139,17 +144,105 @@ export function activate(context: sourcegraph.ExtensionContext): void {
                     return EMPTY
                 })
             )
-            .subscribe(matchedStep => {
-                console.log({ matchedStep, currentContext })
+            .subscribe(locationUpdate => {
+                console.log({ locationUpdate, currentContext })
+                onLocationUpdate(locationUpdate)
                 // This is where we should update panel state
             })
     )
     /**
      * Check whether the latest location matches either the previous or next step.
      * If so, it's likely that the user clicked the "Previous step" or "Next step"
-     * actions, so update the panel and status bar.
+     * actions, so update the panel, status bar, context (for action items).
      */
-    function matchLocationToStep() {}
+    function onLocationUpdate(
+        locationUpdate:
+            | {
+                  type: 'tree'
+                  uri: URL
+              }
+            | {
+                  type: 'blob'
+                  uri: string
+                  selections: sourcegraph.Selection[]
+              }
+    ): void {
+        const activeTourIndex = currentContext['codeTour.activeTourIndex']
+        const currentStepIndex = currentContext['codeTour.tourStep']
+        if (activeTourIndex === null || currentStepIndex === null) {
+            return
+        }
+        const { tour } = currentRepoTours[activeTourIndex]
+
+        const stepActions = [
+            { action: 'prev' as const, stepIndex: currentStepIndex - 1 },
+            { action: 'next' as const, stepIndex: currentStepIndex + 1 },
+        ]
+
+        let matchedStepAction: 'prev' | 'next' | null = null
+
+        for (const { action, stepIndex } of stepActions) {
+            const step = tour.steps[stepIndex]
+            if (!step) {
+                continue
+            }
+            const stepType = determineStepType(step)
+
+            if (stepType === 'content') {
+                // Location wouldn't change for a content step
+                continue
+            }
+
+            if (locationUpdate.type === 'tree') {
+                if (stepType !== 'directory') {
+                    continue
+                }
+                // TODO match
+            } else {
+                if (stepType === 'directory') {
+                    continue
+                }
+
+                if (stepType === 'file') {
+                    const isEqual = step.file === locationUpdate.uri // todo parse relative file path out of uri
+                    if (isEqual) {
+                        matchedStepAction = action
+                        break
+                    }
+                } else {
+                    // Turn line into Range as well so that it can be compared with a Selection (which is a subclass of Range).
+                    // "Line Ranges" in Sourcegraph (one line, no characters) look like this: {end: {line: N, character: 0}, start: {line: N, character: 0}}
+                    const stepRange =
+                        stepType === 'line'
+                            ? new sourcegraph.Range(
+                                  new sourcegraph.Position(step.line! - 1, 0),
+                                  new sourcegraph.Position(step.line! - 1, 0)
+                              )
+                            : new sourcegraph.Range(
+                                  new sourcegraph.Position(
+                                      step.selection!.start.line - 1,
+                                      step.selection!.start.character - 1
+                                  ),
+                                  new sourcegraph.Position(
+                                      step.selection!.end.line - 1,
+                                      step.selection!.end.character - 1
+                                  )
+                              )
+
+                    const isEqual = locationUpdate.selections[0].isEqual(stepRange)
+
+                    if (isEqual) {
+                        matchedStepAction = action
+                        break
+                    }
+                }
+            }
+        }
+        console.log({ matchedStepAction })
+        if (matchedStepAction !== null) {
+            onStepUpdate({ activeTourIndex, currentStepIndex, action: matchedStepAction })
+        }
+    }
 
     /**
      * Builds relative path to be used as a link for "Previous step" or "Next step"
@@ -192,6 +285,9 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         }
 
         switch (baseStepType) {
+            case 'file':
+                return baseStep.file === newStep.file
+
             case 'line':
                 return baseStep.line === newStep.line
 
@@ -245,18 +341,24 @@ export function activate(context: sourcegraph.ExtensionContext): void {
             return
         }
         console.log('started tour!', tour)
+        // updateContext({
+        //     'codeTour.activeTourIndex': tourIndex,
+        //     'codeTour.activeTourTitle': tour.title,
+        //     'codeTour.tourStep': 0,
+        //     'codeTour.showPrevStepNewLocation': false,
+        //     'codeTour.showPrevStepSameLocation': false,
+        //     'codeTour.showNextStepNewLocation': false, // TODO determine.
+        //     'codeTour.showNextStepSameLocation': true,
+        // })
+
+        // // Render step to panel
+        // renderStep({ activeTourIndex: tourIndex, stepIndex: 0 })
+
         updateContext({
             'codeTour.activeTourIndex': tourIndex,
             'codeTour.activeTourTitle': tour.title,
-            'codeTour.tourStep': 0,
-            'codeTour.showPrevStep': false,
-            'codeTour.showPrevStepSameLocation': false,
-            'codeTour.showNextStep': false,
-            'codeTour.showNextStepSameLocation': true,
         })
-
-        // Render step to panel
-        renderStep({ activeTourIndex: tourIndex, stepIndex: 0 })
+        onStepUpdate({ activeTourIndex: tourIndex, currentStepIndex: -1, action: 'next' })
     }
 
     // TODO: Determine how to navigate between locations while updating panel state.
@@ -265,79 +367,95 @@ export function activate(context: sourcegraph.ExtensionContext): void {
     // in the extension (thru combo of file and selection updates) and update panel if the update
     // matches the expected location for the new step.
 
+    /**
+     * Shared between all step updates, whether in the same location or a new location
+     *
+     */
+    function onStepUpdate({
+        activeTourIndex,
+        currentStepIndex,
+        action,
+    }: {
+        activeTourIndex: number
+        currentStepIndex: number
+        action: 'prev' | 'next'
+    }): void {
+        const newCurrentStepIndex = currentStepIndex + (action === 'next' ? 1 : -1)
+        const newPreviousStepIndex = newCurrentStepIndex - 1
+        const newNextStepIndex = newCurrentStepIndex + 1
+
+        const newContext: Partial<CodeTourContext> = {
+            'codeTour.tourStep': newCurrentStepIndex,
+        }
+
+        const { tour } = currentRepoTours[activeTourIndex]
+
+        const newPreviousStep = tour.steps[newPreviousStepIndex]
+        if (newPreviousStep) {
+            // Determine what the "Previous step" button should do once the step has been updated.
+            const previousStepSameLocation = isStepLocationSame({
+                activeTourIndex,
+                baseStepIndex: newCurrentStepIndex,
+                newStepIndex: newPreviousStepIndex,
+            })
+
+            if (previousStepSameLocation) {
+                newContext['codeTour.showPrevStepNewLocation'] = false
+                newContext['codeTour.showPrevStepSameLocation'] = true
+                newContext['codeTour.prevStepURL'] = null
+            } else {
+                newContext['codeTour.showPrevStepNewLocation'] = true
+                newContext['codeTour.showPrevStepSameLocation'] = false
+                newContext['codeTour.prevStepURL'] = createRelativeSourcegraphURL(newPreviousStep)
+            }
+        } else {
+            // Don't show the "Previous step" action if there is no previous step.
+            newContext['codeTour.showPrevStepNewLocation'] = false
+            newContext['codeTour.showPrevStepSameLocation'] = false
+            newContext['codeTour.prevStepURL'] = null
+        }
+
+        const newNextStep = tour.steps[newNextStepIndex]
+        if (newNextStep) {
+            // Determine what the "Next step" button should do once the step has been updated.
+            const nextStepSameLocation = isStepLocationSame({
+                activeTourIndex,
+                baseStepIndex: newCurrentStepIndex,
+                newStepIndex: newNextStepIndex,
+            })
+
+            if (nextStepSameLocation) {
+                newContext['codeTour.showNextStepNewLocation'] = false
+                newContext['codeTour.showNextStepSameLocation'] = true
+                newContext['codeTour.nextStepURL'] = null
+            } else {
+                newContext['codeTour.showNextStepNewLocation'] = true
+                newContext['codeTour.showNextStepSameLocation'] = false
+                newContext['codeTour.nextStepURL'] = createRelativeSourcegraphURL(newNextStep)
+            }
+        } else {
+            // Don't show the "Next step" action if there are no remaining steps.
+            newContext['codeTour.showNextStepNewLocation'] = false
+            newContext['codeTour.showNextStepSameLocation'] = false
+            newContext['codeTour.nextStepURL'] = null
+        }
+
+        renderStep({ activeTourIndex, stepIndex: newCurrentStepIndex })
+        updateContext(newContext)
+    }
+
     function onPreviousStepSameLocation(activeTourIndexString: string, currentStepIndexString: string): void {
         const activeTourIndex = parseInt(activeTourIndexString, 10)
-        const previousStepIndex = parseInt(currentStepIndexString, 10) - 1
-        const nextStepIndex = parseInt(currentStepIndexString, 10) + 1
+        const currentStepIndex = parseInt(currentStepIndexString, 10)
 
-        let prevStepSameLocation: boolean | undefined
-        let nextStepSameLocation: boolean | undefined
-
-        renderStep({ activeTourIndex, stepIndex: previousStepIndex })
-
-        // Determine what the "Previous step" button should do once the step has been updated.
-        if (previousStepIndex - 1 >= 0) {
-            prevStepSameLocation = isStepLocationSame({
-                activeTourIndex,
-                baseStepIndex: previousStepIndex,
-                newStepIndex: previousStepIndex - 1,
-            })
-        }
-        // Determine what the "Next step" button should do once the step has been updated.
-        nextStepSameLocation = isStepLocationSame({
-            activeTourIndex,
-            baseStepIndex: previousStepIndex,
-            newStepIndex: previousStepIndex + 1,
-        })
-
-        console.log({ previousStepIndex, prevStepSameLocation, nextStepSameLocation })
-
-        // Compare adjacent step locations
-        updateContext({
-            'codeTour.tourStep': previousStepIndex,
-            'codeTour.showPrevStep': false,
-            'codeTour.showPrevStepSameLocation': previousStepIndex > 0,
-            'codeTour.showNextStep': false,
-            'codeTour.showNextStepSameLocation': true,
-        })
+        onStepUpdate({ activeTourIndex, currentStepIndex, action: 'prev' })
     }
 
     function onNextStepSameLocation(activeTourIndexString: string, currentStepIndexString: string): void {
         const activeTourIndex = parseInt(activeTourIndexString, 10)
-        const previousStepIndex = parseInt(currentStepIndexString, 10) - 1
-        const nextStepIndex = parseInt(currentStepIndexString, 10) + 1
+        const currentStepIndex = parseInt(currentStepIndexString, 10)
 
-        let prevStepSameLocation: boolean | undefined
-        let nextStepSameLocation: boolean | undefined
-
-        renderStep({ activeTourIndex, stepIndex: nextStepIndex })
-
-        // Determine what the "Previous step" button should do once the step has been updated.
-        prevStepSameLocation = isStepLocationSame({
-            activeTourIndex,
-            baseStepIndex: nextStepIndex,
-            newStepIndex: nextStepIndex - 1,
-        })
-        // Determine what the "Next step" button should do once the step has been updated.
-        if (currentRepoTours[activeTourIndex].tour.steps.length > nextStepIndex + 1) {
-            nextStepSameLocation = isStepLocationSame({
-                activeTourIndex,
-                baseStepIndex: nextStepIndex,
-                newStepIndex: nextStepIndex + 1,
-            })
-        }
-
-        console.log({ nextStepIndex, prevStepSameLocation, nextStepSameLocation })
-
-        // Compare adjacent step locations
-        updateContext({
-            'codeTour.tourStep': nextStepIndex,
-            'codeTour.showPrevStep': false,
-            'codeTour.showPrevStepSameLocation': true,
-            'codeTour.showNextStep': false,
-            'codeTour.showNextStepSameLocation':
-                currentRepoTours[activeTourIndex].tour.steps.length - 1 > nextStepIndex,
-        })
+        onStepUpdate({ activeTourIndex, currentStepIndex, action: 'next' })
     }
 
     function onFinishTour(finishedTourTitle: string): void {}
@@ -438,7 +556,7 @@ async function getTours(): Promise<RepoTour[] | null> {
         if (!repository) {
             return null
         }
-
+        console.log({ repository })
         const result = await sourcegraph.graphQL.execute<SearchResult, { searchQuery: string }>(tourFilesQuery, {
             searchQuery: createToursDirectoryQuery(repository),
         })
@@ -470,25 +588,29 @@ async function getTours(): Promise<RepoTour[] | null> {
     }
 }
 
-type StepType = 'line' | 'directory' | 'selection' | 'content'
+type StepType = 'line' | 'selection' | 'directory' | 'file' | 'content'
 
-function determineStepType(step: SchemaForCodeTourTourFiles['steps'][number]): StepType {
-    if (typeof step.line === 'number') {
-        return 'line'
+export function determineStepType(step: SchemaForCodeTourTourFiles['steps'][number]): StepType {
+    if (step.file) {
+        if (typeof step.line === 'number') {
+            return 'line'
+        }
+
+        if (step.selection) {
+            return 'selection'
+        }
+
+        return 'file'
     }
 
     if (step.directory) {
         return 'directory'
     }
 
-    if (step.selection) {
-        return 'selection'
-    }
-
     return 'content'
 }
 
-function getRepositoryFromRoots(): string | null {
+export function getRepositoryFromRoots(): string | null {
     const workspaceRoot: sourcegraph.WorkspaceRoot | undefined = sourcegraph.workspace.roots[0]
 
     if (!workspaceRoot) {

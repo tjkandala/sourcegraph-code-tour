@@ -42,11 +42,10 @@
         }
       },
       {
-        "id": "codeTour.prevStep",
-        "command": "codeTour.prevStep",
+        "id": "codeTour.prevStepNewLocation",
+        "command": "open",
         "commandArguments": [
-          "${get(context, 'codeTour.activeTourIndex')}",
-          "${get(context, 'codeTour.tourStep')}"
+          "${get(context, 'codeTour.prevStepURL')}"
         ],
         "actionItem": {
           "label": "Previous step"
@@ -64,11 +63,10 @@
         }
       },
       {
-        "id": "codeTour.nextStep",
-        "command": "codeTour.nextStep",
+        "id": "codeTour.nextStepNewLocation",
+        "command": "open",
         "commandArguments": [
-          "${get(context, 'codeTour.activeTourIndex')}",
-          "${get(context, 'codeTour.tourStep')}"
+          "${get(context, 'codeTour.nextStepURL')}"
         ],
         "actionItem": {
           "label": "Next step"
@@ -83,16 +81,6 @@
         ],
         "actionItem": {
           "label": "Next step"
-        }
-      },
-      {
-        "id": "codeTour.navigationTest",
-        "command": "open",
-        "commandArguments": [
-          "/github.com/microsoft/codetour/-/blob/src/player/index.ts?L436#tab=codeTour"
-        ],
-        "actionItem": {
-          "label": "Navigation test!"
         }
       }
     ],
@@ -113,23 +101,20 @@
           "when": "get(context, 'codeTour.workspaceHasMultipleTours') && !get(context, 'codeTour.activeTourTitle')"
         },
         {
-          "action": "codeTour.prevStep",
-          "when": "get(context, 'codeTour.showPrevStep')"
+          "action": "codeTour.prevStepNewLocation",
+          "when": "get(context, 'codeTour.showPrevStepNewLocation')"
         },
         {
           "action": "codeTour.prevStepSameLocation",
           "when": "get(context, 'codeTour.showPrevStepSameLocation')"
         },
         {
-          "action": "codeTour.nextStep",
-          "when": "get(context, 'codeTour.showNextStep')"
+          "action": "codeTour.nextStepNewLocation",
+          "when": "get(context, 'codeTour.showNextStepNewLocation')"
         },
         {
           "action": "codeTour.nextStepSameLocation",
           "when": "get(context, 'codeTour.showNextStepSameLocation')"
-        },
-        {
-          "action": "codeTour.navigationTest"
         }
       ],
       "commandPalette": []
