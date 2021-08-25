@@ -118,35 +118,35 @@
       "panel/toolbar": [
         {
           "action": "codeTour.startTour",
-          "when": "get(context, 'codeTour.workspaceHasOneTour') && !get(context, 'codeTour.activeTourTitle')"
+          "when": "get(context, 'codeTour.workspaceHasOneTour') && !get(context, 'codeTour.activeTourTitle') && panel.activeView.id === 'codeTour'"
         },
         {
           "action": "codeTour.selectTour",
-          "when": "get(context, 'codeTour.workspaceHasMultipleTours') && !get(context, 'codeTour.activeTourTitle')"
+          "when": "get(context, 'codeTour.workspaceHasMultipleTours') && !get(context, 'codeTour.activeTourTitle') && panel.activeView.id === 'codeTour'"
         },
         {
           "action": "codeTour.cancelTour",
-          "when": "get(context, 'codeTour.activeTourTitle') && !get(context, 'codeTour.showCompleteTour')"
+          "when": "get(context, 'codeTour.activeTourTitle') && !get(context, 'codeTour.showCompleteTour') && panel.activeView.id === 'codeTour'"
         },
         {
           "action": "codeTour.prevStepNewLocation",
-          "when": "get(context, 'codeTour.showPrevStepNewLocation')"
+          "when": "get(context, 'codeTour.showPrevStepNewLocation') && panel.activeView.id === 'codeTour'"
         },
         {
           "action": "codeTour.prevStepSameLocation",
-          "when": "get(context, 'codeTour.showPrevStepSameLocation')"
+          "when": "get(context, 'codeTour.showPrevStepSameLocation') && panel.activeView.id === 'codeTour'"
         },
         {
           "action": "codeTour.nextStepNewLocation",
-          "when": "get(context, 'codeTour.showNextStepNewLocation')"
+          "when": "get(context, 'codeTour.showNextStepNewLocation') && panel.activeView.id === 'codeTour'"
         },
         {
           "action": "codeTour.nextStepSameLocation",
-          "when": "get(context, 'codeTour.showNextStepSameLocation')"
+          "when": "get(context, 'codeTour.showNextStepSameLocation') && panel.activeView.id === 'codeTour'"
         },
         {
           "action": "codeTour.completeTour",
-          "when": "get(context, 'codeTour.showCompleteTour')"
+          "when": "get(context, 'codeTour.showCompleteTour') && panel.activeView.id === 'codeTour'"
         }
       ],
       "commandPalette": []
