@@ -21,39 +21,35 @@ export function createRelativeSourcegraphURL(step: SchemaForCodeTourTourFiles['s
 
     const stepType = determineStepType(step)
 
-    return (
-        (() => {
-            switch (stepType) {
-                case 'directory':
-                    return `/${repository}/-/tree/${step.directory!}`
+    switch (stepType) {
+        case 'directory':
+            return `/${repository}/-/tree/${step.directory!}#tab=codeTour`
 
-                case 'file':
-                    return `/${repository}/-/blob/${step.file!}`
+        case 'file':
+            return `/${repository}/-/blob/${step.file!}#tab=codeTour`
 
-                case 'line':
-                    return `/${repository}/-/blob/${step.file!}#L${step.line!}`
+        case 'line':
+            return `/${repository}/-/blob/${step.file!}#L${step.line!}&tab=codeTour`
 
-                case 'selection': {
-                    const { start, end } = step.selection!
+        case 'selection': {
+            const { start, end } = step.selection!
 
-                    if (start.line !== end.line) {
-                        // Ignore character for multi-line ranges (not compatible with Sourcegraph web app)
-                        return `/${repository}/-/blob/${step.file!}#L${start.line}-${end.line}`
-                    }
-
-                    if (start.character !== 0) {
-                        // Ignore end, character ranges are not supported
-                        return `/${repository}/-/blob/${step.file!}#L${step.line!}:${start.character}`
-                    }
-
-                    return `/${repository}/-/blob/${step.file!}#L${step.line!}`
-                }
-
-                case 'content':
-                    throw new Error('Tried to create relative Sourcegraph URL for a content step.')
+            if (start.line !== end.line) {
+                // Ignore character for multi-line ranges (not compatible with Sourcegraph web app)
+                return `/${repository}/-/blob/${step.file!}#L${start.line}-${end.line}&tab=codeTour`
             }
-        })() + '&tab=codeTour' // Keep tab open for all URL types
-    )
+
+            if (start.character !== 0) {
+                // Ignore end, character ranges are not supported
+                return `/${repository}/-/blob/${step.file!}#L${step.line!}:${start.character}&tab=codeTour`
+            }
+
+            return `/${repository}/-/blob/${step.file!}#L${step.line!}&tab=codeTour`
+        }
+
+        case 'content':
+            throw new Error('Tried to create relative Sourcegraph URL for a content step.')
+    }
 }
 
 /**
