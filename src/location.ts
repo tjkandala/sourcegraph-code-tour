@@ -1,4 +1,4 @@
-import { determineStepType, getRepositoryFromRoots } from './code-tour'
+import { determineStepType, getRepositoryInfoFromRoots } from './code-tour'
 import { SchemaForCodeTourTourFiles } from './codeTour'
 
 /**
@@ -10,39 +10,40 @@ import { SchemaForCodeTourTourFiles } from './codeTour'
  * Sourcegraph location hashes are 1-based, like code tour positions.
  */
 export function createRelativeSourcegraphURL(step: SchemaForCodeTourTourFiles['steps'][number]): string {
-    const repository = getRepositoryFromRoots()
+    const repositoryInfo = getRepositoryInfoFromRoots()
 
-    if (!repository) {
+    if (!repositoryInfo) {
         // Should never happen.
         throw new Error('No open repository found.')
     }
 
+    const { repository, revision } = repositoryInfo
     const stepType = determineStepType(step)
 
     switch (stepType) {
         case 'directory':
-            return `/${repository}/-/tree/${step.directory!}#tab=codeTour`
+            return `/${repository}@${revision}/-/tree/${step.directory!}#tab=codeTour`
 
         case 'file':
-            return `/${repository}/-/blob/${step.file!}#tab=codeTour`
+            return `/${repository}@${revision}/-/blob/${step.file!}#tab=codeTour`
 
         case 'line':
-            return `/${repository}/-/blob/${step.file!}#L${step.line!}&tab=codeTour`
+            return `/${repository}@${revision}/-/blob/${step.file!}#L${step.line!}&tab=codeTour`
 
         case 'selection': {
             const { start, end } = step.selection!
 
             if (start.line !== end.line) {
                 // Ignore character for multi-line ranges (not compatible with Sourcegraph web app)
-                return `/${repository}/-/blob/${step.file!}#L${start.line}-${end.line}&tab=codeTour`
+                return `/${repository}@${revision}/-/blob/${step.file!}#L${start.line}-${end.line}&tab=codeTour`
             }
 
             if (start.character !== 0) {
                 // Ignore end, character ranges are not supported
-                return `/${repository}/-/blob/${step.file!}#L${step.line!}:${start.character}&tab=codeTour`
+                return `/${repository}@${revision}/-/blob/${step.file!}#L${step.line!}:${start.character}&tab=codeTour`
             }
 
-            return `/${repository}/-/blob/${step.file!}#L${step.line!}&tab=codeTour`
+            return `/${repository}@${revision}/-/blob/${step.file!}#L${step.line!}&tab=codeTour`
         }
 
         case 'content':

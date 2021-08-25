@@ -10,9 +10,9 @@ import { createRelativeSourcegraphURL, parseRepoURI } from './location'
  *
  * https://marketplace.visualstudio.com/items?itemName=vsls-contrib.codetour#tour-files
  * */
-const createToursDirectoryQuery = (repository: string): string =>
+const createToursDirectoryQuery = (repository: string, revision: string): string =>
     // eslint-disable-next-line no-useless-escape
-    `file:\.tours\/(.*).tour$ repo:${repository} patterntype:regexp`
+    `file:\.tours\/(.*).tour$ repo:${repository}$@${revision} patterntype:regexp`
 
 const tourFilesQuery = `query TourFiles($searchQuery: String) {
         search(query: $searchQuery) {
@@ -248,6 +248,8 @@ export function activate(context: sourcegraph.ExtensionContext): void {
      * - Starting code tour
      * - Clicked prev or next step action for same location
      * - We determine that the user clicked a location-changing prev or next step action, so we can update context
+     *
+     * TODO: consider revision when comparing location?
      */
     function isStepLocationSame({
         activeTourIndex,
@@ -571,12 +573,12 @@ interface SearchResult {
  */
 async function getTours(): Promise<RepoTour[] | null> {
     try {
-        const repository = getRepositoryFromRoots()
-        if (!repository) {
+        const repositoryInfo = getRepositoryInfoFromRoots()
+        if (!repositoryInfo) {
             return null
         }
         const result = await sourcegraph.graphQL.execute<SearchResult, { searchQuery: string }>(tourFilesQuery, {
-            searchQuery: createToursDirectoryQuery(repository),
+            searchQuery: createToursDirectoryQuery(repositoryInfo.repository, repositoryInfo.revision),
         })
 
         const tourFiles = result.data?.search.results.results.map(result => result.file)
@@ -628,14 +630,17 @@ export function determineStepType(step: SchemaForCodeTourTourFiles['steps'][numb
     return 'content'
 }
 
-export function getRepositoryFromRoots(): string | null {
+export function getRepositoryInfoFromRoots(): { repository: string; revision: string } | null {
     const workspaceRoot: sourcegraph.WorkspaceRoot | undefined = sourcegraph.workspace.roots[0]
 
     if (!workspaceRoot) {
         return null
     }
 
-    return workspaceRoot.uri.host + workspaceRoot.uri.pathname
+    return {
+        repository: workspaceRoot.uri.host + workspaceRoot.uri.pathname,
+        revision: workspaceRoot.uri.search.slice(1),
+    }
 }
 
 // Sourcegraph extension documentation: https://docs.sourcegraph.com/extensions/authoring
