@@ -1,6 +1,7 @@
 import { EMPTY, from, of } from 'rxjs'
 import { map, switchMap } from 'rxjs/operators'
 import * as sourcegraph from 'sourcegraph'
+
 import { SchemaForCodeTourTourFiles } from './codeTour'
 import { createRelativeSourcegraphURL, parseRepoURI } from './location'
 
@@ -103,7 +104,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
     sourcegraph.commands.registerCommand('codeTour.startTour', onStartTour)
     sourcegraph.commands.registerCommand('codeTour.prevStepSameLocation', onPreviousStepSameLocation)
     sourcegraph.commands.registerCommand('codeTour.nextStepSameLocation', onNextStepSameLocation)
-    // TODO: sourcegraph.commands.registerCommand('codeTour.completeTour', onCompleteTour)
+    sourcegraph.commands.registerCommand('codeTour.completeTour', onCompleteTour)
 
     const panelView = sourcegraph.app.createPanelView('codeTour')
     panelView.title = 'Code Tour'
@@ -340,9 +341,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
     }
 
     /**
-     * Render step to panel and status bar
-     * TODO: Extract to test.
-     *
+     * Render step to panel (TODO and status bar)
      */
     function renderStep({ activeTourIndex, stepIndex }: { activeTourIndex: number; stepIndex: number }): void {
         const repoTour = currentRepoTours[activeTourIndex]
@@ -355,8 +354,14 @@ export function activate(context: sourcegraph.ExtensionContext): void {
             // render error?
             return
         }
-        // TODO: optional title
-        panelView.content = step.description
+
+        let content = ` ${step.title ? `${step.title}: ` : ''}***${stepIndex + 1} of ${
+            repoTour.tour.steps.length
+        }***\n\n`
+
+        content += step.description
+
+        panelView.content = content
     }
 
     /**
@@ -375,6 +380,12 @@ export function activate(context: sourcegraph.ExtensionContext): void {
             'codeTour.activeTourTitle': tour.title,
         })
         onStepUpdate({ activeTourIndex: tourIndex, currentStepIndex: -1, action: 'next' })
+    }
+
+    function onCompleteTour(): void {
+        updateContext(nullContext)
+        handleRepoTours()
+        // TODO more carefully consider post-finish state
     }
 
     /**
@@ -396,6 +407,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
 
         const newContext: Partial<CodeTourContext> = {
             'codeTour.tourStep': newCurrentStepIndex,
+            'codeTour.showCompleteTour': false, // override in one branch
         }
 
         const { tour } = currentRepoTours[activeTourIndex]
@@ -448,6 +460,7 @@ export function activate(context: sourcegraph.ExtensionContext): void {
             newContext['codeTour.showNextStepNewLocation'] = false
             newContext['codeTour.showNextStepSameLocation'] = false
             newContext['codeTour.nextStepURL'] = null
+            newContext['codeTour.showCompleteTour'] = true // TODO decide whether to always show this
         }
 
         renderStep({ activeTourIndex, stepIndex: newCurrentStepIndex })
@@ -466,11 +479,6 @@ export function activate(context: sourcegraph.ExtensionContext): void {
         const currentStepIndex = parseInt(currentStepIndexString, 10)
 
         onStepUpdate({ activeTourIndex, currentStepIndex, action: 'next' })
-    }
-
-    function onFinishTour(finishedTourTitle: string): void {
-        updateContext(nullContext)
-        panelView.content = 'TODO'
     }
 
     async function onSelectTour(): Promise<void> {
@@ -511,36 +519,40 @@ export function activate(context: sourcegraph.ExtensionContext): void {
 
             if (requestID === currentRequestID) {
                 currentRepoTours = repoTours
-
-                // Populate panel. If there are multiple tours, add "select tour to play" action.
-                // Otherwise, just show the start of the tour?
-
-                if (repoTours.length > 1) {
-                    let content = '## Available code tours\n'
-
-                    content += repoTours
-                        .map(({ tour }) => `1. **${tour.title}**` + (tour.description ? `\n${tour.description}\n` : ''))
-                        .join('\n')
-
-                    panelView.content = content
-                } else if (repoTours.length === 1) {
-                    panelView.content =
-                        `## ${repoTours[0].tour.title}` +
-                        (repoTours[0].tour.description ? `\n${repoTours[0].tour.description}\n` : '')
-                }
-
-                updateContext({
-                    'codeTour.workspaceHasTours': repoTours.length > 0,
-                    'codeTour.workspaceHasOneTour': repoTours.length === 1,
-                    'codeTour.workspaceHasMultipleTours': repoTours.length > 1,
-                    'codeTour.activeTourIndex': null,
-                    'codeTour.activeTourTitle': null,
-                    'codeTour.tourStep': null,
-                })
+                handleRepoTours()
             }
         } catch {
             // noop TODO
         }
+    }
+
+    /**
+     * Called when tours have been fetched or a tour has been completed/cancelled.
+     */
+    function handleRepoTours(): void {
+        const repoTours = currentRepoTours
+        if (repoTours.length > 1) {
+            let content = '## Available code tours\n'
+
+            content += repoTours
+                .map(({ tour }) => `1. **${tour.title}**` + (tour.description ? `\n${tour.description}\n` : ''))
+                .join('\n')
+
+            panelView.content = content
+        } else if (repoTours.length === 1) {
+            panelView.content =
+                `## ${repoTours[0].tour.title}` +
+                (repoTours[0].tour.description ? `\n${repoTours[0].tour.description}\n` : '')
+        }
+
+        updateContext({
+            'codeTour.workspaceHasTours': repoTours.length > 0,
+            'codeTour.workspaceHasOneTour': repoTours.length === 1,
+            'codeTour.workspaceHasMultipleTours': repoTours.length > 1,
+            'codeTour.activeTourIndex': null,
+            'codeTour.activeTourTitle': null,
+            'codeTour.tourStep': null,
+        })
     }
 }
 
