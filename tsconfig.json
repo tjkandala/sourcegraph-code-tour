@@ -9,6 +9,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true
-  }
+    "allowSyntheticDefaultImports": true,
+  },
+  "exclude": ["scripts/*", "node_modules", "dist", "**/*.test.ts"],
 }

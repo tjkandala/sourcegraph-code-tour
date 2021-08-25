@@ -1,6 +1,4 @@
-import * as sourcegraph from 'sourcegraph'
 import { determineStepType, getRepositoryFromRoots } from './code-tour'
-
 import { SchemaForCodeTourTourFiles } from './codeTour'
 
 /**
