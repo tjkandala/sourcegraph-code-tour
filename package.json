@@ -17,6 +17,10 @@
     "onboarding",
     "education"
   ],
+  "repository": {
+    "url": "https://github.com/tjkandala/sourcegraph-code-tour",
+    "type": "git"
+  },
   "contributes": {
     "actions": [
       {
