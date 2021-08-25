@@ -1,14 +1,22 @@
 {
   "$schema": "https://raw.githubusercontent.com/sourcegraph/sourcegraph/main/client/shared/src/schema/extension.schema.json",
   "name": "code-tour",
-  "description": "",
-  "publisher": "tj",
+  "description": "Play guided tours of codebases (compatible with VS Code's codetour)",
+  "publisher": "tjkandala",
+  "version": "0.0.0-DEVELOPMENT",
+  "icon": "https://vsls-contrib.gallerycdn.vsassets.io/extensions/vsls-contrib/codetour/0.0.58/1625784500119/Microsoft.VisualStudio.Services.Icons.Default",
   "activationEvents": [
     "*"
   ],
   "wip": true,
-  "categories": [],
-  "tags": [],
+  "categories": [
+    "Code analysis"
+  ],
+  "tags": [
+    "code tour",
+    "onboarding",
+    "education"
+  ],
   "contributes": {
     "actions": [
       {
@@ -145,7 +153,6 @@
     },
     "configuration": {}
   },
-  "version": "0.0.0-DEVELOPMENT",
   "license": "Apache-2.0",
   "main": "dist/code-tour.js",
   "scripts": {
